@@ -15,24 +15,21 @@ Status: Draft
 ```text
 self-healing-playwright-agent/
   agent/
-    graph.py            # LangGraph wiring: assistant <-> tools ReAct loop (ADR-006)
-    assistant.py        # the single LLM node: reasons, emits tool_calls
-    tools.py            # @tool defs (the guarded actions) + ToolNode registration
+    graph.py            # LangGraph wiring: deterministic backbone + heal_agent loop (ADR-006)
+    heal_agent.py       # the ONE assistant: ReAct loop bound to exactly 3 heal tools
+    nodes.py            # deterministic nodes: detect_failure, triage, apply_fix, escalate, report, retry
+    routing.py          # backbone edges + heal-loop route (guards decide)
+    guards.py           # can_propose / can_apply / should_force_escalate (pure)
     state.py            # AgentState (messages + typed artifacts) + Pydantic models
     config.py           # model ids, τ thresholds, attempt/recursion caps, env loading
-    llm.py              # traced OpenAI client wrapper (Langfuse), temperature=0, tools bound
-  tools/                # implementations behind the @tool wrappers (guards live here)
-    capture_snapshot.py # DOM/a11y/error-class snapshot -> failure
-    classify_triage.py  # -> TriageVerdict (uses test intent)
-    memory_io.py        # check_memory / save_memory (replay known fix, 0 LLM)
-    propose_candidates.py # GUARD: drift only -> HealProposal (>=2 ranked)
-    judge_heal.py       # re-run step + re-check assertion -> HealVerdict
-    apply_fix.py        # GUARD: approved+>=τ+assertion_held, single-match, test-dir only
-    report_regression.py # only path for regression/data
-    retry_step.py       # bounded backoff for flake
-    escalate.py         # interrupt -> PR / escalations/<id>.md
-    finish.py           # set outcome -> route END
+    llm.py              # traced OpenAI/DeepSeek client wrapper (Langfuse), temperature=0
+  tools/                # the 3 heal_agent tools (guards live here) + apply_fix core
+    memory_io.py        # check_memory (replay known fix, 0 LLM) — tool 1
+    propose_candidates.py # GUARD: drift only -> HealProposal (>=2 ranked) — tool 2
+    judge_heal.py       # re-run step + re-check assertion -> HealVerdict — tool 3
+    apply_fix.py        # core: single-match replace + test-dir guard (used by the apply node)
   sut/
+    capture.py          # DOM/a11y/error-class snapshot (used by detect_failure node)
     harness.py          # Option A: addInitScript DOM-mutation injector
     profiles.py         # mutation profiles: testid-rename/role-change/text-change/structural-wrap
     realworld/          # Option B: fork pointers, v1/v2 deploy notes, a11y-diff fixture gen
@@ -51,41 +48,66 @@ self-healing-playwright-agent/
   TASK.md
 ```
 
-### Runtime topology — Guarded ReAct loop (ADR-006)
+### Runtime topology — deterministic backbone + small stage agent (ADR-006)
 
-One LLM `assistant` node loops with a `ToolNode` (`assistant → tools → assistant`) until the
-assistant calls `finish()` (routes to END) or an iteration cap forces escalate. The assistant
-chooses the next tool each step (thought → action → observation); **safety invariants are
-enforced inside the tools as code, not by the model's routing.** The typed artifacts in state
-(`triage`, `proposal`, `verdict`) are the source of truth the guards check — the LLM cannot
-talk past a guard.
+**Tool-count rule (ADR-006a): no assistant node sees more than 3 tools.** A single ReAct
+assistant bound to ~10 tools picks badly. So the runtime is a small graph: a **deterministic
+backbone** for the linear, safety-critical steps, and **one scoped ReAct sub-agent** for the
+only step that genuinely needs iteration (healing). Side-effecting safety actions
+(`apply_fix`, `escalate`, `report`, `retry`) are **deterministic nodes gated by code guards**,
+never LLM-invoked.
 
 ```text
-        ┌──────────────┐
-   ┌───►│  assistant   │  emits tool_calls?  ── no ─► END
-   │    └──────┬───────┘
-   │           ▼ yes
-   │    ┌──────────────┐
-   └────┤  tools (Node)│  execute -> ToolMessage observations
-        └──────────────┘
+  detect_failure (node, Playwright)          # no tools — deterministic
+        │
+        ▼
+  triage (node, 1 LLM call -> TriageVerdict) # no tool-choosing
+        │ route on category
+        ├── regression / data ─► report  (node)            -> outcome=reported
+        ├── flake ─────────────► retry   (node) ─► detect_failure (bounded)
+        │
+        ▼ drift
+  ┌───────────────────────────────┐
+  │ heal_agent  ⇄  heal_tools      │   ReAct loop, <=3 tools:
+  │  (assistant)   (ToolNode)      │   { check_memory, propose_candidates, judge_heal }
+  └──────────────┬────────────────┘   loops until an approved verdict or attempt cap
+                 │ route via guards
+                 ├── can_apply(verdict, τ) ─► apply_fix (node) -> outcome=healed
+                 └── else / cap reached ────► escalate  (node) -> outcome=escalated
 ```
 
-Key guards (live in the tool implementations):
-- `propose_candidates`: refuse unless `triage.category == "drift"`.
-- `apply_fix`: refuse unless `verdict.approved and verdict.confidence >= τ and
-  verdict.assertion_held`; single-match dry-run; writes only under the SUT test dir.
-- `report_regression`: the only path enabled for `regression`/`data`.
-- Termination: `finish(outcome)` → END; iteration/attempt cap (REQ-009) + LangGraph
-  `recursion_limit` → forced escalate.
+Why this shape:
+- **≤3 tools per assistant** (only `heal_agent` is an assistant; it has exactly 3). Triage is
+  a single classification call — a plain node, not a tool-choosing loop. Detect is deterministic.
+- **Safety is even stronger than the all-in-one loop:** `apply_fix`/`escalate`/`report` are
+  deterministic graph edges driven by the `can_apply` / `can_propose` guards, so the LLM never
+  *chooses* to apply or skip the judge — the graph + guards do.
+- **The loop stays where it earns its keep:** `heal_agent` iterates over candidates and the
+  judge (propose → judge → maybe re-propose) until approved or the attempt cap fires.
+
+Key guards (in tool/node code, checked against typed state):
+- `heal_agent` is only reached when `triage.category == "drift"` (graph topology) AND
+  `propose_candidates` re-checks `can_propose(triage)` defensively.
+- `apply_fix` edge requires `can_apply(verdict, τ)` (approved ∧ conf≥τ ∧ assertion_held);
+  the node also does the single-match dry-run and test-dir-only write.
+- `report` is the only node reachable for `regression`/`data`.
+- Termination: every branch ends in a terminal node setting `outcome`; `heal_agent` loop is
+  bounded by `MAX_HEAL_ATTEMPTS` + LangGraph `recursion_limit` → forced escalate.
+
+> Splitting further later: if `heal_agent` ever needs a 4th tool, split it into two agents
+> (e.g. `signal_agent` {gather_a11y, gather_text} → `verify_agent` {judge_heal}) each with its
+> own ToolNode, rather than growing one agent past 3 tools.
 
 ### Boundaries
 
-- **Tools are the only actors:** the assistant node only reasons + emits tool_calls; every
-  side effect (browser, LLM sub-calls, disk, PR) happens inside a tool behind a thin adapter
-  (`agent/llm.py`, `sut/harness.py`, `memory/store.py`, `tools/escalate.py`).
-- **State has two channels:** `messages` (ReAct trail, `add_messages` reducer) drives the
-  loop; typed artifacts (`failure/triage/proposal/verdict/attempts/outcome`) are what guards
-  read. Tools update the typed channel, not just the chat.
+- **≤3 tools per assistant (ADR-006a):** only `heal_agent` is an assistant, with exactly the
+  3 healing tools. Detect and triage are deterministic nodes; apply/escalate/report/retry are
+  deterministic nodes. Grow past 3 → split into another agent + ToolNode.
+- **Side effects live in tools/nodes behind thin adapters** (`agent/llm.py`, `sut/harness.py`,
+  `memory/store.py`, `tools/escalate.py`).
+- **State has two channels:** `messages` (the heal_agent ReAct trail, `add_messages` reducer)
+  drives that sub-loop; typed artifacts (`failure/triage/proposal/verdict/attempts/outcome`)
+  are what the guards and backbone routing read.
 - **LLM access only via `agent/llm.py`** so every call is traced + deterministic.
 - **`apply_fix` may write only files under the SUT test dir** — an explicit allow-path guard;
   it can never touch application source.
@@ -162,20 +184,22 @@ runner ─► run_agent(failure_context)
   falls back to `escalations/<id>.md` if PR creation fails.
 - Consequences: requires a checkpointer for resumable interrupts; safe by construction.
 
-### ADR-006: Runtime control flow — single assistant + guarded-tool ReAct loop
-- Context: choose between a fixed node chain (`triage→heal→judge→apply`) where topology is the
-  safety guarantee, vs a single assistant node that loops over tools (thought→action→observation)
-  until done.
-- Options: (a) guarded ReAct (LLM routes freely, tools enforce invariants); (b) constrained
-  ReAct (triage hard-branches the graph so heal tools are unreachable for regressions);
-  (c) fixed node chain (no LLM routing).
-- Decision: **(a) Guarded ReAct.** One `assistant` node ↔ `ToolNode`; the old nodes become
-  tools; safety lives in code guards inside the tools (checked against typed state artifacts,
-  not the chat). Loop ends on `finish()` or an iteration cap → escalate.
-- Consequences: flexible/agentic and matches the "one assistant + tools loop" model, while the
-  "never heal a regression / never apply an unjudged heal" invariants stay deterministic.
-  Cost: must test the guards directly (a malicious/hallucinated tool-call sequence must be
-  rejected), and set both an attempt cap and `recursion_limit` so the loop always terminates.
+### ADR-006: Runtime control flow — deterministic backbone + one scoped heal agent
+- Context: choose between a fixed node chain (topology is the safety guarantee) and a single
+  assistant looping over all tools (thought→action→observation). A single assistant bound to
+  ~10 tools also picks tools poorly.
+- Options: (a) one assistant with all tools (guarded ReAct); (b) deterministic backbone +
+  small stage agents (≤3 tools each); (c) fully fixed node chain (no LLM routing).
+- Decision: **(b).** Deterministic nodes for detect, triage, and all side-effecting safety
+  actions (apply_fix/escalate/report/retry); **one ReAct sub-agent `heal_agent` with exactly 3
+  tools** (`check_memory`, `propose_candidates`, `judge_heal`) for the only iterative step.
+  Safety invariants are code guards (`can_propose`, `can_apply`) on graph edges + in tools.
+- **ADR-006a (tool-count rule):** no assistant node may be bound to more than 3 tools. If a
+  stage needs more, split it into another assistant + its own ToolNode.
+- Consequences: better tool selection (small menus), and safety is *stronger* than the all-in-one
+  loop — the LLM never chooses to apply/skip-judge; the graph + guards do. Cost: a few more graph
+  nodes; the heal loop still needs an attempt cap + `recursion_limit` to always terminate. The
+  guards must be unit-tested directly (done: `tests/test_guards.py`).
 
 ## Implementation Constraints
 

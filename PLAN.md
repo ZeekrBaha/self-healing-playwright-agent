@@ -53,14 +53,16 @@ EVAL PLANE (CI, offline)
 
 ## Runtime control flow — Guarded ReAct (ADR-006)
 
-The runtime plane is **one `assistant` LLM node looping with a `ToolNode`**
-(`assistant → tools → assistant`, thought→action→observation) until the assistant
-calls `finish()` or an iteration cap forces escalate. The detect/triage/heal/judge/
-apply/escalate/report/retry steps above are **tools** the assistant calls — not a fixed
-node chain. The safety invariants ("never heal a regression", "never apply an unjudged
-or assertion-hollowing heal") are enforced as **code guards inside the tools**, checked
-against typed state artifacts (`triage`, `proposal`, `verdict`), so the LLM cannot route
-around them. Full rationale in `docs/implementation/architecture.md` (ADR-006).
+The runtime plane is a **deterministic backbone** (detect → triage → branch; and the
+side-effecting actions apply_fix/escalate/report/retry as plain nodes) plus **one scoped
+ReAct sub-agent `heal_agent` bound to exactly 3 tools** (`check_memory`,
+`propose_candidates`, `judge_heal`) for the only step that needs iteration. **No assistant
+node sees more than 3 tools (ADR-006a)** — split into another agent + ToolNode before
+growing one past 3. The safety invariants ("never heal a regression", "never apply an
+unjudged or assertion-hollowing heal") are enforced as **code guards on graph edges + in
+tools**, checked against typed state (`triage`, `proposal`, `verdict`), so the LLM never
+chooses to apply or skip the judge — the graph does. Rationale in
+`docs/implementation/architecture.md` (ADR-006 / ADR-006a).
 
 ## Stack
 
