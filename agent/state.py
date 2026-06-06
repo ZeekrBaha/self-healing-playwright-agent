@@ -12,6 +12,16 @@ from pydantic import BaseModel, Field
 
 TriageCategory = Literal["drift", "regression", "flake", "data"]
 HealSignal = Literal["role_name", "text", "nearby_testid", "structural"]
+ErrorClass = Literal["selector_resolution", "assertion", "timeout", "other"]
+
+
+class FailureSnapshot(BaseModel):
+    failing_step: str
+    error_class: ErrorClass
+    broken_selector: str | None = None
+    dom_html: str = ""
+    a11y_tree: dict = Field(default_factory=dict)
+    screenshot_path: str | None = None
 
 
 class TriageVerdict(BaseModel):
