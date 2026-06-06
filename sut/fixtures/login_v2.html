@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Login (v2 — refactored)</title></head>
+<body>
+  <h1>Sign in</h1>
+  <!--
+    v1 had:  <button id="login-button" ...>Login</button>
+    v2 refactor renamed the id login-button -> signin-button (organic selector drift).
+    The accessible name ("Login") and role (button) are unchanged — the heal signal.
+  -->
+  <input id="user-name" data-test="username" placeholder="Username">
+  <input id="password" type="password" data-test="password" placeholder="Password">
+  <button id="signin-button" aria-label="Login"
+          onclick="document.getElementById('welcome').style.display='block'">Login</button>
+  <div id="welcome" style="display:none">Welcome — you are logged in.</div>
+</body>
+</html>
