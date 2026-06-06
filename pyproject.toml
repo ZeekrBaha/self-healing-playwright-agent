@@ -9,7 +9,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Added incrementally as features land (kept out of the core install until needed).
-runtime = ["langgraph", "langfuse", "playwright", "openai"]
+runtime = ["langgraph", "langfuse", "playwright", "openai", "python-dotenv"]
 
 [dependency-groups]
 dev = ["pytest>=8"]

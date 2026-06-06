@@ -1,0 +1,51 @@
+name: eval-gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Always: the free, deterministic unit + integration suite (live tests deselected).
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install (runtime + dev)
+        run: uv pip install --system -e ".[runtime]" pytest
+      - name: Run suite (skips live LLM tests)
+        run: pytest
+
+  # Prompt regression gate: runs when the triage prompt / eval config changes.
+  promptfoo:
+    runs-on: ubuntu-latest
+    needs: tests
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect prompt/eval changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            prompts:
+              - 'eval/**'
+              - 'agent/nodes.py'
+              - 'tools/judge_heal.py'
+              - 'tools/propose_candidates.py'
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.prompts == 'true' && env.OPENAI_API_KEY != ''
+        with:
+          node-version: '22'
+      - name: Promptfoo eval (fails build below threshold)
+        if: steps.changes.outputs.prompts == 'true' && env.OPENAI_API_KEY != ''
+        run: npx -y promptfoo@latest eval -c eval/promptfooconfig.yaml
+      - name: Note
+        if: steps.changes.outputs.prompts != 'true'
+        run: echo "No prompt/eval changes — promptfoo gate skipped."
