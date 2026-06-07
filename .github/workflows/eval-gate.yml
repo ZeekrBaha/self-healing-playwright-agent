@@ -12,12 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Set up Python
-        run: uv python install 3.11
+      - name: Set up Python + venv
+        run: |
+          uv python install 3.11
+          uv venv --python 3.11
       - name: Install (runtime + dev)
-        run: uv pip install --system -e ".[runtime]" pytest
+        run: uv pip install -e ".[runtime]" pytest
       - name: Run suite (skips live LLM tests)
-        run: pytest
+        run: uv run pytest
 
   # Prompt regression gate: runs when the triage prompt / eval config changes.
   promptfoo:
