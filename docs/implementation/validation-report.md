@@ -24,7 +24,8 @@ Suite after fixes: **70 passed** (was 65), ruff clean, triage eval 4/4, judge ev
 
 ## Commands Run
 
-- `uv run pytest` → **65 passed, 4 deselected** (live deselected by default)
+- `uv run pytest` → **70 passed, 4 deselected** (live deselected by default)
+- `uv run ruff check .` → clean; `uv run mypy agent tools memory sut` → no issues (20 files)
 - `uv run python scripts/smoke_providers.py` → OpenAI ✓ DeepSeek ✓ Langfuse auth ✓
 - `uv run pytest -m live tests/test_triage.py` → **1 passed** (OpenAI)
 - `uv run pytest -m live tests/test_propose.py` → **1 passed** (OpenAI, ≥2 candidates)
@@ -61,8 +62,9 @@ Suite after fixes: **70 passed** (was 65), ruff clean, triage eval 4/4, judge ev
 
 ## Known Gaps
 
-- **Langfuse screenshot** (`docs/assets/langfuse-flow.png`): no Langfuse MCP in this
-  environment → manual capture. Traces already exist (demo/e2e/promptfoo runs).
+- **Langfuse screenshot** (`docs/assets/langfuse-flow.png`): the Langfuse MCP is installed but
+  is prompt-management only (no trace-screenshot/dashboard capability) → manual capture.
+  Traces already exist (demo/e2e/promptfoo runs).
 - **SUT Option B** (RealWorld v1→v2 two-deploy demo): documented, not deployed; the
   deterministic fixture covers the full heal loop.
 - **Escalation PR via `interrupt()`**: currently writes an artifact; PR path specced in ADR-005.
@@ -70,7 +72,7 @@ Suite after fixes: **70 passed** (was 65), ruff clean, triage eval 4/4, judge ev
 ## Final Reviewer Notes
 
 PM: Core value (heal drift, never mask a regression) is demonstrated end-to-end. Ship-ready as a portfolio piece.
-Developer: All logic TDD; live boundaries injected for deterministic tests. 65 + 5 live + 4 promptfoo green.
+Developer: All logic TDD; live boundaries injected for deterministic tests. 70 + 5 live + 6 promptfoo green; ruff + mypy clean.
 Tester: Both negative invariants proven (regression→report; false-heal→escalate).
 Reviewer: No untraced LLM calls; apply_fix is test-dir-only + single-match; no secrets tracked.
 Team Lead: Phase gates met through Phase 7 + a live Phase 8 validation run. Remaining items are polish (screenshot, Option B).

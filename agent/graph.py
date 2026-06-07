@@ -97,9 +97,11 @@ def _heal_node(deps: Deps):
         triage: TriageVerdict = state["triage"]
         test_id, step_id = state["test_id"], state["step_id"]
         broken = failure.broken_selector or ""
+        store = deps.store
+        assert store is not None  # always set in Deps.__post_init__
 
         # 1) memory first — zero-LLM replay
-        fixed = check_memory(deps.store, test_id=test_id, step_id=step_id, broken_selector=broken)
+        fixed = check_memory(store, test_id=test_id, step_id=step_id, broken_selector=broken)
         if fixed:
             sp, ah = deps.run_step(fixed)
             if sp and ah:
@@ -111,7 +113,7 @@ def _heal_node(deps: Deps):
                     ),
                     "attempts": 0,
                 }
-            deps.store.invalidate(_key(test_id, step_id, broken))  # stale, fall through
+            store.invalidate(_key(test_id, step_id, broken))  # stale, fall through
 
         # 2) defensive guard, then propose + judge each candidate
         if not can_propose(triage):
@@ -141,6 +143,9 @@ def _apply_node(deps: Deps):
         ensure_in_test_dir(test_file, deps.test_dir)
         broken = state["failure"].broken_selector or ""
         fixed = state["chosen_selector"]
+        store = deps.store
+        assert store is not None  # always set in Deps.__post_init__
+        assert fixed is not None  # apply is only reached with an approved chosen_selector
         before = test_file.read_text()
         patched = replace_locator(before, broken=broken, fixed=fixed)
         # write a reviewable diff artifact before mutating the file
@@ -149,7 +154,7 @@ def _apply_node(deps: Deps):
             make_diff(test_file, before, patched)
         )
         test_file.write_text(patched)
-        remember_fix(deps.store, test_id=state["test_id"], step_id=state["step_id"],
+        remember_fix(store, test_id=state["test_id"], step_id=state["step_id"],
                      broken_selector=broken, fixed_selector=fixed)
         return {"outcome": "healed"}
 

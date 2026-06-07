@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  # Always: lint + the free, deterministic unit/integration suite (live tests deselected).
+  # Always: lint + types + the free, deterministic unit/integration suite (live deselected).
   tests:
     runs-on: ubuntu-latest
     steps:
@@ -17,9 +17,11 @@ jobs:
           uv python install 3.11
           uv venv --python 3.11
       - name: Install (runtime + dev)
-        run: uv pip install -e ".[runtime]" pytest ruff
+        run: uv pip install -e ".[runtime]" pytest ruff mypy
       - name: Lint
         run: uv run ruff check .
+      - name: Type check
+        run: uv run mypy agent tools memory sut
       - name: Run suite (skips live LLM tests)
         run: uv run pytest
 
@@ -44,11 +46,17 @@ jobs:
               - 'agent/nodes.py'
               - 'tools/judge_heal.py'
               - 'tools/propose_candidates.py'
-      # No silent skip: if the gate is relevant but can't run, FAIL loudly.
+      # No silent skip: false-heal safety is central, so BOTH provider secrets are required
+      # when prompt/eval files change. Missing either = loud failure, not a skipped gate.
       - name: Require OPENAI_API_KEY when prompts changed
         if: steps.changes.outputs.prompts == 'true' && env.OPENAI_API_KEY == ''
         run: |
-          echo "::error::Prompt/eval files changed but OPENAI_API_KEY secret is missing — the eval gate cannot run. Add the repo secret to enforce it."
+          echo "::error::Prompt/eval files changed but OPENAI_API_KEY secret is missing — triage gate cannot run."
+          exit 1
+      - name: Require DEEPSEEK_API_KEY when prompts changed
+        if: steps.changes.outputs.prompts == 'true' && env.DEEPSEEK_API_KEY == ''
+        run: |
+          echo "::error::Prompt/eval files changed but DEEPSEEK_API_KEY secret is missing — judge/false-heal gate cannot run."
           exit 1
       - uses: actions/setup-node@v4
         if: steps.changes.outputs.prompts == 'true'
@@ -58,7 +66,7 @@ jobs:
         if: steps.changes.outputs.prompts == 'true'
         run: npx -y promptfoo@latest eval -c eval/promptfooconfig.yaml
       - name: Judge / false-heal eval (DeepSeek)
-        if: steps.changes.outputs.prompts == 'true' && env.DEEPSEEK_API_KEY != ''
+        if: steps.changes.outputs.prompts == 'true'
         run: npx -y promptfoo@latest eval -c eval/promptfooconfig.judge.yaml
       - name: Note
         if: steps.changes.outputs.prompts != 'true'

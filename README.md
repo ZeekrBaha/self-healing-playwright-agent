@@ -82,7 +82,9 @@ committed.)*
 
 | Check | Result |
 |---|---|
-| Unit + integration suite (`pytest`) | **65 passed** (live deselected) |
+| Unit + integration suite (`pytest`) | **70 passed** (live deselected) |
+| Type check (`mypy`) | ✓ clean (20 files) |
+| Lint (`ruff`) | ✓ clean |
 | Live triage (OpenAI) | ✓ valid category |
 | Live propose (OpenAI) | ✓ ≥2 candidates |
 | Live judge (DeepSeek) | ✓ verdict |
@@ -102,18 +104,20 @@ Demo run (`scripts/demo.py`): triage **drift** (conf 0.9) → judge approved (st
 ## 8. How to run
 
 ```bash
-uv venv && uv pip install -e ".[runtime]" pytest
+uv venv && uv pip install -e ".[runtime]" --group dev   # runtime + dev (pytest, ruff, mypy)
 uv run playwright install chromium
 
-uv run pytest                    # 65 green, live deselected (free, deterministic)
+uv run ruff check . && uv run mypy agent tools memory sut   # lint + types
+uv run pytest                    # 70 green, live deselected (free, deterministic)
 cp .env.example .env             # then add keys (never committed)
 uv run python scripts/smoke_providers.py    # OpenAI + DeepSeek + Langfuse connectivity
 
 uv run pytest -m live            # the live tests (real API calls)
 uv run python scripts/demo.py    # run-once heal demo (real browser + models + Langfuse)
 
-# eval gate (needs node >=22.22, OPENAI_API_KEY)
-npx -y promptfoo@latest eval -c eval/promptfooconfig.yaml
+# eval gate (needs node >=22.22)
+npx -y promptfoo@latest eval -c eval/promptfooconfig.yaml          # triage (OPENAI_API_KEY)
+npx -y promptfoo@latest eval -c eval/promptfooconfig.judge.yaml    # false-heal (DEEPSEEK_API_KEY)
 ```
 
 ## 9. Keys / env
@@ -152,7 +156,9 @@ as deterministic, guard-gated nodes. See `docs/implementation/architecture.md`.
 ## 13. Limitations / next steps
 
 - SUT Option B (RealWorld v1→v2) is documented but not deployed here (fixture covers the loop).
-- Langfuse metric dashboards + the trace screenshot are a manual capture step (no Langfuse MCP).
+- Langfuse metric dashboards + the trace screenshot are a manual capture step. (The Langfuse
+  MCP *is* installed, but it's prompt-management only — `getPrompt`/`listPrompts`/`createPrompt`/
+  `updateLabels` — so it can't render dashboards or screenshot traces.)
 - Escalation currently writes an artifact; the GitHub-PR `interrupt()` path is specced.
 
 ## License

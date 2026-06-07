@@ -15,9 +15,13 @@ from langfuse.openai import OpenAI  # Langfuse-traced drop-in
 from agent import config
 
 
-def _complete_json(messages, *, model: str, name: str, api_key: str, base_url: str | None = None) -> dict:
+def _complete_json(
+    messages: list[dict], *, model: str, name: str, api_key: str, base_url: str | None = None
+) -> dict:
     client = OpenAI(api_key=api_key, base_url=base_url)
-    resp = client.chat.completions.create(
+    # `name=` is a Langfuse-drop-in extension (sets the trace span name); the OpenAI type
+    # stubs don't know it, so this one call is exempted from the overload check.
+    resp = client.chat.completions.create(  # type: ignore[call-overload]
         model=model,
         messages=messages,
         temperature=config.TEMPERATURE,
