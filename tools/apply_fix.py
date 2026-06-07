@@ -6,29 +6,57 @@ HealVerdict guard (can_apply) and a dry-run diff before touching disk.
 
 from __future__ import annotations
 
+import difflib
+import re
 from pathlib import Path
+
+# Matches the contents of a single- or double-quoted string literal (with escapes).
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"' r"|'(?:[^'\\]|\\.)*'")
 
 
 class LocatorNotFound(ValueError):
-    """The broken selector was not present in the source."""
+    """The broken selector was not present inside any string literal."""
 
 
 class AmbiguousLocator(ValueError):
-    """The broken selector appears more than once — refuse rather than guess."""
+    """The broken selector appears in more than one literal — refuse rather than guess."""
 
 
 class OutsideTestDir(ValueError):
     """Refused: apply_fix may only write under the SUT test dir."""
 
 
+def _quoted_ranges(source: str) -> list[tuple[int, int]]:
+    return [(m.start(), m.end()) for m in _QUOTED.finditer(source)]
+
+
 def replace_locator(source: str, *, broken: str, fixed: str) -> str:
-    """Replace exactly one occurrence of `broken` with `fixed`. Abort on 0 or >1."""
-    count = source.count(broken)
-    if count == 0:
+    """Replace `broken` with `fixed` — but only where it occurs INSIDE a quoted string
+    literal (a real locator argument), never in comments or surrounding code. Abort on
+    0 or >1 such occurrences so we never guess or touch unrelated text.
+    """
+    ranges = _quoted_ranges(source)
+    positions: list[int] = []
+    start = 0
+    while (i := source.find(broken, start)) != -1:
+        end = i + len(broken)
+        if any(lo <= i and end <= hi for lo, hi in ranges):
+            positions.append(i)
+        start = i + 1
+    if not positions:
         raise LocatorNotFound(broken)
-    if count > 1:
-        raise AmbiguousLocator(f"{broken} appears {count} times")
-    return source.replace(broken, fixed)
+    if len(positions) > 1:
+        raise AmbiguousLocator(f"{broken} appears in {len(positions)} string literals")
+    i = positions[0]
+    return source[:i] + fixed + source[i + len(broken):]
+
+
+def make_diff(path: str | Path, before: str, after: str) -> str:
+    """Unified diff of a locator patch — written as an artifact before the file is touched."""
+    return "".join(difflib.unified_diff(
+        before.splitlines(keepends=True), after.splitlines(keepends=True),
+        fromfile=f"{path} (before)", tofile=f"{path} (after)",
+    ))
 
 
 def ensure_in_test_dir(target: Path | str, test_dir: Path | str) -> None:

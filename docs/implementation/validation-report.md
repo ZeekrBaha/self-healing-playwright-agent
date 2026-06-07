@@ -10,6 +10,18 @@ the free deterministic suite, live single-call tests per LLM node, and a live en
 on a reproducible drifted fixture using real OpenAI + DeepSeek + Langfuse. The Promptfoo
 triage gate passes 4/4.
 
+## Post-review fixes (2026-06-06)
+
+External review findings, all addressed:
+1. **Packaging** — wheel now ships `agent`, `tools`, `memory`, `sut` (was `agent` only). Verified `uv build`.
+2. **TRIAGE_CONFIDENCE_FLOOR enforced** — low-confidence drift now escalates (graph routing + `tests/test_graph.py::test_low_confidence_drift_escalates_instead_of_healing`).
+3. **README claims softened** — Langfuse screenshot marked manual/not-committed; metrics split into implemented (eval) vs planned (runtime scores).
+4. **apply_fix locator-aware** — replaces only inside quoted string literals (never comments/code) + writes a diff artifact before mutating (`tests/test_apply_fix.py`).
+5. **Eval hardened** — Promptfoo now JSON-parses the category (not substring); added a judge/false-heal eval (`promptfooconfig.judge.yaml`); CI fails loudly if prompts change without the secret (no silent skip).
+6. **Tooling** — ruff + mypy added to dev deps; CI runs `ruff check`.
+
+Suite after fixes: **70 passed** (was 65), ruff clean, triage eval 4/4, judge eval 2/2.
+
 ## Commands Run
 
 - `uv run pytest` → **65 passed, 4 deselected** (live deselected by default)

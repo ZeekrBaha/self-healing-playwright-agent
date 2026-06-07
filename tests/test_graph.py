@@ -6,7 +6,6 @@ fake browser runner prove the two headline flows + the safety routing end-to-end
 
 from pathlib import Path
 
-import pytest
 
 from agent.graph import Deps, build_graph
 from agent.state import FailureSnapshot
@@ -128,6 +127,28 @@ def test_memory_hit_replays_with_zero_llm_calls(tmp_path):
     out = build_graph(deps).invoke(base_state(f))
     assert out["outcome"] == "healed"
     assert llm_calls["n"] == 0  # replayed from memory, no proposer/judge calls
+
+
+def test_low_confidence_drift_escalates_instead_of_healing(tmp_path):
+    # drift, but the triage is not confident enough to risk auto-healing a possible regression
+    test_dir, f = make_test_file(tmp_path)
+    propose_calls = {"n": 0}
+
+    def propose_spy(m, *, name):
+        propose_calls["n"] += 1
+        return PROPOSE_TWO(m, name=name)
+
+    deps = Deps(
+        triage_complete=lambda m, *, name: {"category": "drift", "confidence": 0.3, "evidence": "unsure"},
+        propose_complete=propose_spy, judge_complete=JUDGE_APPROVE,
+        run_step=lambda sel: (True, True),
+        store=HealMemoryStore(tmp_path / "mem.json"),
+        test_dir=test_dir, artifacts_dir=tmp_path / "runs",
+    )
+    out = build_graph(deps).invoke(base_state(f))
+    assert out["outcome"] == "escalated"
+    assert propose_calls["n"] == 0  # never reached the healer
+    assert "#login-old" in f.read_text()  # not patched
 
 
 def test_flake_routes_to_retry(tmp_path):

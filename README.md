@@ -60,15 +60,23 @@ The agent heals tests for a **system under test**. Two options (see `PLAN.md`):
 The LLM never *chooses* to apply or skip the judge — the graph edges + pure guards do. A
 0.99-confidence "approve" is rejected if `assertion_held` is false.
 
-*(Langfuse trace of a real heal run — `triage` / `propose_candidates` / `judge_heal` spans:
-`docs/assets/langfuse-flow.png`.)*
+*(Every `triage` / `propose_candidates` / `judge_heal` call is traced in Langfuse. A trace
+screenshot is a manual capture step — see `docs/assets/README.md`; the image is not yet
+committed.)*
 
 ## 5. The metric stack
 
-- **Deterministic:** expected selector present; valid JSON; cost ceiling per call.
+**Implemented (eval plane, CI-gated):**
+- **Deterministic:** triage returns valid JSON; category is correct (parsed, not substring);
+  cost ceiling per call.
 - **Model-graded (`llm-rubric`):** rationale quality of the triage evidence.
-- **Runtime scores (Langfuse):** `heal_success_rate`, `false_heal_rate`,
-  `mean_attempts_per_heal`, `cost_per_heal`, `auto_vs_escalated_ratio`.
+
+**Planned (runtime scores in Langfuse — not yet emitted):**
+- `heal_success_rate`, `false_heal_rate`, `mean_attempts_per_heal`, `cost_per_heal`,
+  `auto_vs_escalated_ratio`. Traces flow today; aggregate score emission is future work.
+
+> The false-heal *property* is enforced deterministically in code + tests (`judge_heal`,
+> `tests/test_judge.py`, `tests/test_graph.py`), not yet as a runtime false-heal-*rate* gate.
 
 ## 6. Findings (this build)
 
@@ -122,7 +130,7 @@ agent/      state.py (typed verdicts) · guards.py (invariants) · routing.py ·
 tools/      memory_io · propose_candidates · judge_heal · apply_fix   (the 3 heal tools + patch core)
 memory/     store.py (keyed JSON, zero-LLM replay)
 sut/        capture.py · profiles.py (DOM mutations) · runner.py (live Playwright) · fixtures/
-eval/       promptfooconfig.yaml · triage_prompt.json     (Phase 7 gate)
+eval/       promptfooconfig.yaml (triage) · promptfooconfig.judge.yaml (false-heal) · *_prompt.json
 scripts/    smoke_providers.py · demo.py
 tests/      11 test files (unit + integration + live)
 docs/       implementation/ (research→validation) · prompts/ (role prompts)

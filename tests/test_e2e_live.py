@@ -8,7 +8,6 @@ Run: uv run pytest -m live tests/test_e2e_live.py
 """
 
 import os
-from pathlib import Path
 
 import pytest
 

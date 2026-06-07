@@ -30,8 +30,8 @@ tests:
       dom: "<button id='signin' aria-label='Login'>Login</button>"
       a11y: "{role: button, name: Login}"
     assert:
-      - type: contains
-        value: "drift"
+      - type: javascript
+        value: "JSON.parse(output).category === 'drift'"
       - type: llm-rubric
         value: "evidence explains that the selector/id changed but the element still exists"
 
@@ -47,10 +47,8 @@ tests:
       # Safety property that actually matters: a real wrong value must NOT be treated as drift
       # (drift is the only category that heals). regression vs data is an acceptable nuance —
       # both route to report (no heal).
-      - type: contains-any
-        value: ["regression", "data"]
-      - type: not-contains
-        value: "drift"
+      - type: javascript
+        value: "['regression','data'].includes(JSON.parse(output).category)"
 
   - description: "timeout on navigation -> flake"
     vars:
@@ -61,8 +59,8 @@ tests:
       dom: "<body><div id='spinner'></div></body>"
       a11y: "{role: progressbar}"
     assert:
-      - type: contains
-        value: "flake"
+      - type: javascript
+        value: "JSON.parse(output).category === 'flake'"
 
   - description: "empty inventory -> data"
     vars:
@@ -73,5 +71,5 @@ tests:
       dom: "<div class='inventory'></div>"
       a11y: "{role: list, name: inventory, children: []}"
     assert:
-      - type: contains
-        value: "data"
+      - type: javascript
+        value: "JSON.parse(output).category === 'data'"

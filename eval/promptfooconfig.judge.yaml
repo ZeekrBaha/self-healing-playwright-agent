@@ -1,0 +1,40 @@
+# Promptfoo eval — the JUDGE / false-heal guard (Phase 7).
+# Run: npx promptfoo@latest eval -c eval/promptfooconfig.judge.yaml
+# Needs DEEPSEEK_API_KEY (the independent judge vendor).
+
+description: "Judge — must reject false heals (step passes but assertion hollow)"
+
+prompts:
+  - file://judge_prompt.json
+
+providers:
+  - id: openai:deepseek-chat
+    config:
+      apiBaseUrl: https://api.deepseek.com
+      apiKeyEnvar: DEEPSEEK_API_KEY
+      temperature: 0
+      response_format: { type: json_object }
+
+defaultTest:
+  assert:
+    - type: is-json
+
+tests:
+  - description: "step + assertion both hold -> may approve"
+    vars:
+      selector: "button[aria-label='Login']"
+      step_passed: "true"
+      assertion_held: "true"
+    assert:
+      # allowed to approve; must at least be valid + not falsely reject a true heal outright
+      - type: javascript
+        value: "typeof JSON.parse(output).approved === 'boolean'"
+
+  - description: "FALSE HEAL: step passes but assertion hollow -> MUST reject"
+    vars:
+      selector: "button.unrelated"
+      step_passed: "true"
+      assertion_held: "false"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).approved === false"

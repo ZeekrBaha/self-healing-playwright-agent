@@ -154,10 +154,13 @@ runner ─► run_agent(failure_context)
 ### ADR-002: `apply_fix` patch mechanism — AST vs regex
 - Context: must replace a locator string in a Playwright test file safely and reversibly.
 - Options: (a) regex/string replace of the exact broken selector; (b) Python AST rewrite.
-- Decision: **start with targeted string replacement** of the exact `broken_selector` within
-  the identified test+step, guarded by a dry-run diff that must match a single occurrence;
-  abort + escalate on 0 or >1 matches. Revisit AST only if string replace proves brittle.
-- Consequences: simplest reversible mechanism; the single-match guard prevents collateral edits.
+- Decision: **locator-aware replacement** — replace `broken_selector` only where it occurs
+  inside a quoted string literal (a real locator argument), never in comments or surrounding
+  code; abort + escalate on 0 or >1 such occurrences. A unified **diff artifact** is written
+  before the file is mutated (reviewable). Implemented in `tools/apply_fix.py`
+  (`replace_locator`, `make_diff`). Full AST/codemod per language remains a future upgrade.
+- Consequences: reversible + safe against collateral edits to comments/code; the single-match
+  guard prevents guessing; the diff gives a human a reviewable record of every patch.
 
 ### ADR-003: LLM providers (split agent/judge) + determinism
 - Context: triage/heal/judge need structured, repeatable output; the judge backs the

@@ -31,7 +31,7 @@ from agent.llm import agent_complete, judge_complete
 from agent.nodes import classify_triage
 from agent.state import FailureSnapshot, HealProposal, HealVerdict, TriageVerdict
 from memory.store import HealMemoryStore
-from tools.apply_fix import ensure_in_test_dir, replace_locator
+from tools.apply_fix import ensure_in_test_dir, make_diff, replace_locator
 from tools.judge_heal import judge_heal
 from tools.memory_io import check_memory, remember_fix
 from tools.propose_candidates import propose_candidates
@@ -141,7 +141,13 @@ def _apply_node(deps: Deps):
         ensure_in_test_dir(test_file, deps.test_dir)
         broken = state["failure"].broken_selector or ""
         fixed = state["chosen_selector"]
-        patched = replace_locator(test_file.read_text(), broken=broken, fixed=fixed)
+        before = test_file.read_text()
+        patched = replace_locator(before, broken=broken, fixed=fixed)
+        # write a reviewable diff artifact before mutating the file
+        deps.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (deps.artifacts_dir / f"patch_{state['test_id']}_{state['step_id']}.diff").write_text(
+            make_diff(test_file, before, patched)
+        )
         test_file.write_text(patched)
         remember_fix(deps.store, test_id=state["test_id"], step_id=state["step_id"],
                      broken_selector=broken, fixed_selector=fixed)
@@ -191,8 +197,13 @@ def _retry_node(_deps: Deps):
 
 
 def _route_after_triage(state: AgentState) -> str:
-    cat = state["triage"].category
+    triage = state["triage"]
+    cat = triage.category
     if cat == "drift":
+        # Don't gamble a possibly-misclassified regression into the healer: a low-confidence
+        # drift verdict escalates to a human instead of auto-healing (TRIAGE_CONFIDENCE_FLOOR).
+        if triage.confidence < config.TRIAGE_CONFIDENCE_FLOOR:
+            return "escalate"
         return "heal"
     if cat == "flake":
         return "retry"
@@ -224,7 +235,8 @@ def build_graph(deps: Deps | None = None):
 
     g.set_entry_point("triage")
     g.add_conditional_edges("triage", _route_after_triage,
-                            {"heal": "heal", "retry": "retry", "report": "report"})
+                            {"heal": "heal", "retry": "retry", "report": "report",
+                             "escalate": "escalate"})
     g.add_conditional_edges("heal", _route_after_heal, {"apply": "apply", "escalate": "escalate"})
     for terminal in ("apply", "escalate", "report", "retry"):
         g.add_edge(terminal, END)
