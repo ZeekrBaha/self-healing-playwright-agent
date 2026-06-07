@@ -22,6 +22,14 @@ External review findings, all addressed:
 
 Suite after fixes: **70 passed** (was 65), ruff clean, triage eval 4/4, judge eval 2/2.
 
+Second pass:
+7. **mypy tightened** — replaced global `ignore_missing_imports` with per-module overrides for
+   only the stub-less libs (`langgraph.*`, `langfuse.*`, `playwright.*`, `dotenv.*`); our own
+   code is fully type-checked. mypy clean (20 files).
+8. **Freshly re-verified this pass** — live tests **4/4** (triage, propose, judge, e2e, ~11s),
+   Promptfoo triage **4/4**, judge **2/2**; both provider connectivities confirmed.
+9. **README framing** — explicit "working prototype, not production healer" status at the top.
+
 ## Commands Run
 
 - `uv run pytest` → **70 passed, 4 deselected** (live deselected by default)

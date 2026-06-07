@@ -1,5 +1,10 @@
 # Self-Healing Playwright Agent — Triage → Heal → Judge
 
+> **Status: working prototype (portfolio project), not a production healer.** The full
+> triage→heal→judge→apply loop runs end-to-end against a controlled drift **fixture** with
+> real models; it is not yet hardened for arbitrary real-world test suites (single-fixture
+> SUT, string-literal patching, no runtime metric gates). See §13 for the exact boundaries.
+
 A [LangGraph](https://github.com/langchain-ai/langgraph) agent that, when a Playwright test
 fails, decides **why** it failed (selector drift / genuine regression / flake / data change),
 heals **only** true selector drift, and validates every heal with an independent LLM judge
