@@ -1,0 +1,75 @@
+# Promptfoo eval — regression-gate the TRIAGE prompt (Phase 7).
+# Run: npx promptfoo@latest eval -c eval/promptfooconfig.yaml
+# Needs OPENAI_API_KEY. CI runs this on changes to the triage prompt.
+
+description: "Triage classifier — drift vs regression vs flake vs data"
+
+prompts:
+  - file://triage_prompt.json
+
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      response_format: { type: json_object }
+
+# Every case must return valid JSON. Per-case asserts pin the expected category.
+defaultTest:
+  assert:
+    - type: is-json
+    - type: cost
+      threshold: 0.01   # cents-level per case; catches accidental model bloat
+
+tests:
+  - description: "selector renamed -> drift"
+    vars:
+      intent: "user logs in and reaches the inventory page"
+      failing_step: "click the login button"
+      error_class: "selector_resolution"
+      broken_selector: "#login-btn"
+      dom: "<button id='signin' aria-label='Login'>Login</button>"
+      a11y: "{role: button, name: Login}"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).category === 'drift'"
+      - type: llm-rubric
+        value: "evidence explains that the selector/id changed but the element still exists"
+
+  - description: "wrong price -> regression (must NOT be drift)"
+    vars:
+      intent: "cart shows the correct item price"
+      failing_step: "assert price equals $29.99"
+      error_class: "assertion"
+      broken_selector: "null"
+      dom: "<span class='price'>$2.99</span>"
+      a11y: "{role: text, name: $2.99}"
+    assert:
+      # Safety property that actually matters: a real wrong value must NOT be treated as drift
+      # (drift is the only category that heals). regression vs data is an acceptable nuance —
+      # both route to report (no heal).
+      - type: javascript
+        value: "['regression','data'].includes(JSON.parse(output).category)"
+
+  - description: "timeout on navigation -> flake"
+    vars:
+      intent: "user opens the dashboard"
+      failing_step: "wait for dashboard to load"
+      error_class: "timeout"
+      broken_selector: "null"
+      dom: "<body><div id='spinner'></div></body>"
+      a11y: "{role: progressbar}"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).category === 'flake'"
+
+  - description: "empty inventory -> data"
+    vars:
+      intent: "inventory list shows 6 products"
+      failing_step: "assert 6 product cards"
+      error_class: "assertion"
+      broken_selector: "null"
+      dom: "<div class='inventory'></div>"
+      a11y: "{role: list, name: inventory, children: []}"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).category === 'data'"

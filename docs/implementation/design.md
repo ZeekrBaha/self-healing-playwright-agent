@@ -46,11 +46,12 @@ This project has **no application UI of its own**. The human-facing surfaces are
 ## System Architecture
 
 - **Frontend:** none (the agent is headless; SUT UI is external/forked).
-- **Backend / orchestration:** LangGraph **Guarded ReAct loop** (ADR-006) — one `assistant`
-  LLM node ↔ `ToolNode`, looping thought→action→observation until `finish()` or an iteration
-  cap. The detect/triage/heal/judge/apply/escalate/report/retry actions are **tools**; safety
-  invariants are code guards inside the tools (checked against typed state, not the chat).
-  `interrupt()` for HITL escalation.
+- **Backend / orchestration:** LangGraph — a **deterministic backbone** (detect, triage,
+  apply_fix, escalate, report, retry as nodes) plus **one scoped ReAct sub-agent `heal_agent`
+  bound to exactly 3 tools** (`check_memory`, `propose_candidates`, `judge_heal`) for the
+  iterative heal step (ADR-006 / ADR-006a: ≤3 tools per assistant). Safety invariants are code
+  guards (`can_propose`, `can_apply`) on graph edges + in tools; side-effecting actions are
+  deterministic nodes, never LLM-chosen. `interrupt()` for HITL escalation.
 - **Browser/heal execution:** Playwright (Python) — drives the SUT, captures DOM + a11y
   snapshots, re-runs steps for the judge.
 - **Storage:** heal-memory store (keyed JSON to start; SQLite/mem0 optional later);

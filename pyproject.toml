@@ -9,21 +9,37 @@ dependencies = [
 
 [project.optional-dependencies]
 # Added incrementally as features land (kept out of the core install until needed).
-runtime = ["langgraph", "langfuse", "playwright", "openai"]
+runtime = ["langgraph", "langfuse", "playwright", "openai", "python-dotenv"]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not live'"   # default suite skips live LLM calls (free + deterministic)
+markers = [
+    "live: hits real OpenAI/DeepSeek APIs (run explicitly: pytest -m live)",
+]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+# lambda stubs are idiomatic for injectable LLM fakes in tests
+"tests/**" = ["E731"]
+
+[tool.mypy]
+python_version = "3.11"
+# Don't globally ignore missing imports — only the specific third-party libs that ship no
+# stubs. This keeps type coverage on our own code and its boundaries.
+[[tool.mypy.overrides]]
+module = ["langgraph.*", "langfuse.*", "playwright.*", "dotenv.*"]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["agent"]
+# agent.graph imports memory/tools/sut at import time — all must ship in the wheel.
+packages = ["agent", "tools", "memory", "sut"]

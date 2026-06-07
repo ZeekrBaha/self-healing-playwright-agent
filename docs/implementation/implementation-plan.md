@@ -55,29 +55,31 @@ Acceptance: AC-001. Tests: Unit (snapshot fields, error-class split); Integratio
 Validation: `pytest tests/test_detect.py`, run each profile.
 Risks/rollback: snapshot too large → trim to relevant subtree.
 
-### Task 1b — Assistant loop + tool registry (Guarded ReAct, ADR-006)
+### Task 1b — Graph backbone + heal_agent (ADR-006 / ADR-006a)
 Owner role: Developer
 
-Files: `agent/graph.py`, `agent/assistant.py`, `agent/tools.py`, `agent/state.py` (add `messages`), `agent/config.py` (iteration/recursion caps), `tests/test_loop.py`
+Files: `agent/graph.py`, `agent/heal_agent.py`, `agent/nodes.py`, `agent/routing.py`, `agent/state.py` (add `messages`), `agent/config.py`, `tests/test_loop.py`
 
 Steps:
-- [ ] `AgentState` gains `messages: Annotated[list, add_messages]` alongside typed artifacts.
-- [ ] `assistant` node: `llm_with_tools.invoke(messages)` (traced, temperature=0, pinned id).
-- [ ] `agent/tools.py`: register the actions as `@tool`s (capture_snapshot, classify_triage,
-      check_memory/save_memory, propose_candidates, judge_heal, apply_fix, report_regression,
-      retry_step, escalate, finish) backed by `tools/` implementations.
-- [ ] `graph.py`: `assistant ↔ ToolNode` loop; conditional edge ends on `finish()`/no tool_calls.
-- [ ] System prompt encodes the required order; **guards live in tools, not the prompt.**
-- [ ] Iteration/attempt cap + LangGraph `recursion_limit` → forced escalate (terminates always).
+- [ ] `AgentState` gains `messages: Annotated[list, add_messages]` (used by heal_agent only).
+- [ ] Deterministic backbone nodes in `agent/nodes.py`: `detect_failure`, `triage` (1 LLM call),
+      `apply_fix`, `escalate`, `report`, `retry`. Side-effecting nodes are NOT LLM-chosen.
+- [ ] `heal_agent`: ReAct loop bound to **exactly 3 tools** (`check_memory`,
+      `propose_candidates`, `judge_heal`); loops until an approved verdict or `MAX_HEAL_ATTEMPTS`.
+- [ ] `graph.py` wiring: detect → triage → {drift→heal_agent, regression/data→report,
+      flake→retry→detect}; heal_agent → {can_apply→apply_fix, else→escalate}.
+- [ ] Backbone routing uses `guards.can_propose`/`can_apply` — the LLM never routes the
+      safety actions. `recursion_limit` backstop so the heal loop always terminates.
+- [ ] **No assistant bound to >3 tools (ADR-006a).** If heal needs a 4th tool, split it.
 
-Acceptance: loop runs end-to-end on one drift case (heal) and one regression case (report);
-malformed tool sequences are rejected by guards. Tests: Unit (route fn); Integration (loop
-terminates; guard rejects apply_fix without approved verdict — the adversarial test).
+Acceptance: graph runs end-to-end on one drift case (heal) and one regression case (report);
+the apply edge is unreachable without an approving verdict (adversarial test). Tests: Unit
+(route fns — done); Integration (loop terminates; regression never reaches heal_agent).
 Validation: `pytest tests/test_loop.py`.
-Risks/rollback: runaway loop → recursion_limit backstop; guard bypass → guard unit tests.
+Risks/rollback: runaway loop → recursion_limit backstop; guard bypass → guard unit tests (done).
 
-> Note: Tasks 2–5 below now build the **tools + their code guards** (in `tools/`), invoked by
-> the assistant loop, rather than standalone graph nodes. Acceptance criteria are unchanged.
+> Note: Tasks 2–5 below build the **heal_agent tools + their guards** (`tools/`) and the
+> deterministic backbone nodes (`agent/nodes.py`). Acceptance criteria unchanged.
 
 ### Task 2 — Triage node (PLAN Phase 2) — CENTERPIECE
 Owner role: Developer + Tester
